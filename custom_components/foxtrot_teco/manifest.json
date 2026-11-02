@@ -1,22 +1,17 @@
 {
   "domain": "foxtrot_teco",
   "name": "Foxtrot TECO (TecoApi Nested)",
-  "version": "0.1.0",
-  "documentation": "https://github.com/jeanpijon/homeassistant-foxtrot",
-  "requirements": [],
   "codeowners": [
     "@jeanpijon"
   ],
-  "iot_class": "local_polling",
-  "integration_type": "hub",
   "config_flow": true,
+  "documentation": "https://github.com/jeanpijon/homeassistant-foxtrot",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/jeanpijon/homeassistant-foxtrot/issues",
   "loggers": [
     "custom_components.foxtrot_teco"
   ],
-  "platforms": [
-    "climate",
-    "sensor",
-    "switch"
-  ],
-  "issue_tracker": "https://github.com/jeanpijon/homeassistant-foxtrot/issues"
+  "requirements": [],
+  "version": "0.1.0"
 }
