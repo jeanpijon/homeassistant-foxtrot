@@ -1,0 +1,83 @@
+{
+  "title": "Foxtrot TECO",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to TECO Web API",
+        "data": {
+          "resource": "Base URL (e.g. http://PLC-IP/TecoApi/)",
+          "auth_type": "Auth",
+          "username": "Username",
+          "password": "Password",
+          "verify_ssl": "Verify SSL",
+          "scan_interval": "Scan interval (s)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect or invalid response."
+    },
+    "abort": {}
+  },
+  "entity": {
+    "sensor": {
+      "ha_livingroom_temp_air": {
+        "name": "Obývák – teplota vzduchu"
+      },
+      "ha_livingroom_temp_floor": {
+        "name": "Obývák – teplota podlahy"
+      },
+      "ha_livingroom_humidity": {
+        "name": "Obývák – vlhkost"
+      },
+      "ha_livingroom_co2": {
+        "name": "Obývák – koncentrace CO₂"
+      },
+      "ha_bedroom_temp_air": {
+        "name": "Ložnice – teplota vzduchu"
+      },
+      "ha_bedroom_temp_floor": {
+        "name": "Ložnice – teplota podlahy"
+      },
+      "ha_bedroom_humidity": {
+        "name": "Ložnice – vlhkost"
+      },
+      "ha_bathroom_temp_air": {
+        "name": "Koupelna – teplota vzduchu"
+      },
+      "ha_bathroom_temp_floor": {
+        "name": "Koupelna – teplota podlahy"
+      },
+      "ha_bathroom_humidity": {
+        "name": "Koupelna – vlhkost"
+      },
+      "ha_guestbedroom_temp_air": {
+        "name": "Pokoj – teplota vzduchu"
+      },
+      "ha_guestbedroom_temp_floor": {
+        "name": "Pokoj – teplota podlahy"
+      },
+      "ha_guestbedroom_humidity": {
+        "name": "Pokoj – vlhkost"
+      },
+      "ha_ensuit_temp_air": {
+        "name": "Ensuit koupelna – teplota vzduchu"
+      },
+      "ha_ensuit_temp_floor": {
+        "name": "Ensuit koupelna – teplota podlahy"
+      },
+      "ha_ensuit_humidity": {
+        "name": "Ensuit koupelna – vlhkost"
+      },
+      "ha_sauna_temp_air": {
+        "name": "Sauna – teplota vzduchu"
+      },
+      "ha_sauna_temp_floor": {
+        "name": "Sauna – teplota lavice"
+      },
+      "ha_sauna_humidity": {
+        "name": "Sauna – vlhkost"
+      }
+    }
+  }
+}

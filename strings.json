@@ -1,0 +1,22 @@
+{
+  "title": "Foxtrot TECO",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to TECO Web API",
+        "data": {
+          "resource": "Base URL (e.g. http://PLC-IP/TecoApi/)",
+          "auth_type": "Auth",
+          "username": "Username",
+          "password": "Password",
+          "verify_ssl": "Verify SSL",
+          "scan_interval": "Scan interval (s)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect or invalid response."
+    },
+    "abort": {}
+  }
+}

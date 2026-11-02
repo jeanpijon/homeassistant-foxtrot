@@ -89,7 +89,7 @@ tecoapi:
     password: <<password>>
 
 switch:
-  - platform: tecoapi
+  - platform: foxtrot_teco
     object: Lights
     name: Lights
     subobjects:
@@ -102,13 +102,13 @@ switch:
             name: Kitchen
 
 binary_sensor:
-  - platform: tecoapi
+  - platform: foxtrot_teco
     object: Windows.FirstFloor.R1
     name: Kitchen Window
     device_class: window
 
 sensor:
-  - platform: tecoapi
+  - platform: foxtrot_teco
     object: HotWater
     unit_of_measurement: °C
 ```

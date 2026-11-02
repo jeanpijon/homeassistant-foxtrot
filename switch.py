@@ -1,211 +1,92 @@
-"""TecoAPI Switch."""
-import logging
-from datetime import timedelta
-import asyncio
-import voluptuous as vol
-import aiohttp
+from __future__ import annotations
 
-import homeassistant.helpers.config_validation as cv
-from homeassistant.exceptions import PlatformNotReady
-from homeassistant.components.switch import (
-    PLATFORM_SCHEMA,
-    DEVICE_CLASSES_SCHEMA,
-    SwitchEntity, DOMAIN as DOMAIN_SWITCH
-)
-from homeassistant.const import (
-    CONF_NAME,
-    CONF_DEVICE_CLASS,
-)
+from typing import Any
+from homeassistant.components.switch import SwitchEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    DOMAIN,
-    DATA_TECOAPI,
-    CONF_OBJECT,
-    CONF_SUBOBJECTS,
-    TECOAPI_GETOBJECT,
-)
+from .const import DOMAIN
+from . import make_unique_id
 
-SWITCH_SCHEMA = {
-    vol.Required(CONF_OBJECT): cv.string,
-    vol.Optional(CONF_NAME, default=""): cv.string,
-    vol.Optional(CONF_DEVICE_CLASS): DEVICE_CLASSES_SCHEMA,
-    vol.Optional(CONF_SUBOBJECTS, default=[]): vol.All(cv.ensure_list, [vol.Self]),
-}
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(SWITCH_SCHEMA)
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+    store = hass.data[DOMAIN][entry.entry_id]
+    coordinator = store["coordinator"]
+    client = store["client"]
 
-PARALLEL_UPDATES = 0
-SCAN_INTERVAL = timedelta(seconds=3)
+    entities: list[TecoSwitch] = []
+    for var_path, face in coordinator.data.items():
+        # expect faces shaped like:
+        # {"name": "...", "kind": 3, "writable": true/false, "state": bool, "key": "...", "_serial": "..."}
+        try:
+            kind = int(face.get("kind", 0))
+        except Exception:
+            continue
+        if kind == 3 and bool(face.get("writable", False)):
+            entities.append(TecoSwitch(coordinator, client, var_path))
 
-_LOGGER = logging.getLogger(__name__)
+    if entities:
+        async_add_entities(entities)
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Set up the TecoAPI switch."""
 
-    if DATA_TECOAPI not in hass.data:
-        raise PlatformNotReady
+class TecoSwitch(CoordinatorEntity, SwitchEntity):
+    _attr_should_poll = False
+    _attr_has_entity_name = True
 
-    data = hass.data[DATA_TECOAPI]
+    def __init__(self, coordinator, client, var_path: str):
+        super().__init__(coordinator)
+        self._client = client
+        self._path = var_path
+        self._update_from_face()
 
-    entities = []
+    def _face(self) -> dict[str, Any]:
+        return self.coordinator.data[self._path]
 
-    if discovery_info is None:
-        objectid = config.get(CONF_OBJECT)
-        await async_setup_switch(hass, data, config, entities, objectid)
-    else:
-        for child_config in discovery_info:
-            objectid = child_config.get(CONF_OBJECT)
-            await async_setup_switch(hass, data, child_config, entities, objectid)
+    def _update_from_face(self) -> None:
+        face = self._face()
+        name = face.get("name") or self._path
+        self._attr_name = str(name)
 
-    async_add_entities(entities, True)
+        serial = face.get("_serial", "unknown")
+        key = face.get("key")
+        kind = int(face.get("kind", 3))
+        self._attr_unique_id = make_unique_id(serial, kind, key, self._path)
 
-async def async_setup_switch(hass, data, config, entities, objectid, parent = None):
-    """Setup switch helper"""
-        # pylint: disable=too-many-arguments
-
-    try:
-        if parent is None:
-            value = await data.async_get(TECOAPI_GETOBJECT, objectid, True)
-        else:
-            value = parent.child_values[objectid]
-
-        if type(value) is dict:
-            switch = TecoApiSwitch(data, config, objectid, value, parent)
-            pos = len(entities)
-
-            switches_config = config.get(CONF_SUBOBJECTS, [])
-
-            for childid in value:
-                child_config = next((item for item in switches_config if item.get(CONF_OBJECT) == childid), {})
-                await async_setup_switch(hass, data, child_config, entities, childid, switch)
-
-            if parent is None or not switch._children:
-                entities.insert(pos, switch)
-        elif type(value) is bool:
-            entities.append(TecoApiSwitch(data, config, objectid, value, parent))
-        else:
-            _LOGGER.error("Unable to setup %s", objectid)
-
-    except asyncio.TimeoutError:
-        _LOGGER.exception("Timed out %s while setup", objectid)
-    except aiohttp.ClientError as err:
-        _LOGGER.exception("Error while %s setup: %s", objectid, err)
-
-class TecoApiSwitch(SwitchEntity):
-    """TecoAPI Switch Entity."""
-    # pylint: disable=too-many-instance-attributes
-
-    def __init__(self, data, config, objectid, value, parent):
-        """Init."""
-        # pylint: disable=too-many-arguments
-
-        self._name = config.get(CONF_NAME)
-        self._device_class = config.get(CONF_DEVICE_CLASS)
-
-        self._data = data
-        self._objectid = objectid 
-        self._parent = parent
-
-        self._children = []
-        if parent: 
-            parent._children.append(self)
-            self._name = self._name or parent._name + ' ' + objectid
-        else:
-            self._name = self._name or objectid
-            self._value = value #only root items store data
-
-        self.entity_id = self.unique_id
+        # group all entities under the PLC device
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, serial)},
+            "manufacturer": "TECO",
+            "name": f"Foxtrot {serial}",
+        }
 
     @property
-    def unique_id(self):
-        """Return unique identifier."""
-        return DOMAIN_SWITCH + "." + DOMAIN + "_" + self.fullobjectid.lower().replace(".", "_")
+    def available(self) -> bool:
+        # consider face present if it's in coordinator data
+        return self._path in self.coordinator.data
 
     @property
-    def name(self):
-        """Return the name of the switch."""
-        return self._name
-
-    @property
-    def device_class(self):
-        """Return the class of this device, from component DEVICE_CLASSES."""
-        return self._device_class
-
-    @property
-    def is_on(self):
-        """Return if entity is on."""
-        if self._children:
-            for child in self._children:
-                if child.is_on:
-                    return True
-            return False
-
-        if self._parent:
-            return self._parent.child_values[self._objectid]
-        return self._value
+    def is_on(self) -> bool:
+        face = self._face()
+        # server provides boolean; be tolerant of 0/1
+        val = face.get("state", False)
+        if isinstance(val, (int, float)):
+            return float(val) >= 0.5
+        return bool(val)
 
     async def async_turn_on(self, **kwargs):
-        """Turn the device on."""
-        if self._children:
-            for child in self._children:
-                await child.async_turn_on(**kwargs)
-        else:
-            try:
-                if await self._data.async_put('PutObject', self.fullobjectid, True):
-                    if self._parent:
-                        self._parent.child_values[self._objectid] = True
-                    else:
-                        self._value = True
-            except asyncio.TimeoutError:
-                _LOGGER.exception("Timed out while %s switching on", self._objectid)
-            except aiohttp.ClientError as err:
-                _LOGGER.error("Error while %s switching on %s", self._objectid, err)
+        await self._client.set_object(self._path, {"state": True})
+        # optimistic update, then refresh
+        self._face()["state"] = True
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs):
-        """Turn the device off."""
-        if self._children:
-            for child in self._children:
-                await child.async_turn_off(**kwargs)
-        else:
-            try:
-                if await self._data.async_put('PutObject', self.fullobjectid, False):
-                    if self._parent:
-                        self._parent.child_values[self._objectid] = False
-                    else:
-                        self._value = False
-            except asyncio.TimeoutError:
-                _LOGGER.exception("Timed out %s while switching off", self._objectid)
-            except aiohttp.ClientError as err:
-                _LOGGER.error("Error while %s switching off %s", self._objectid, err)
+        await self._client.set_object(self._path, {"state": False})
+        self._face()["state"] = False
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
 
-    async def async_update(self):
-        """Get the current state, catching errors."""
-        if self._parent is None:
-            try:
-                value = await self._data.async_get(TECOAPI_GETOBJECT, self._objectid, False)
-                if value is None:
-                    _LOGGER.error("Unable to update %s", self._objectid)
-                else:
-                    self._value = value
-
-            except asyncio.TimeoutError:
-                _LOGGER.warning("Timed out %s while fetching data", self._objectid)
-            except aiohttp.ClientError as err:
-                _LOGGER.exception("Error while %s fetching data: %s", self._objectid, err)
-
-    ### Heplers ###
-    @property
-    def child_values(self):
-        if self._parent:
-            ret = self._parent.child_values[self._objectid]
-        else: 
-            ret = self._value
-
-        return ret
-
-    @property
-    def fullobjectid(self):
-        if self._parent:
-            return self._parent.fullobjectid + '.' + self._objectid
-        return self._objectid
-
+    def _handle_coordinator_update(self) -> None:
+        self._update_from_face()
+        self.async_write_ha_state()

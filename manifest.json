@@ -1,9 +1,13 @@
 {
-  "domain": "tecoapi",
-  "name": "TecoAPI",
-  "documentation": "https://github.com/jrojko/hass_tecoapi",
+  "domain": "foxtrot_teco",
+  "name": "Foxtrot TECO (TecoApi Nested)",
+  "version": "0.1.0",
+  "documentation": "https://example.local/foxtrot_teco",
   "requirements": [],
-  "dependencies": [],
-  "codeowners": ["@jrojko"],
-  "version": "1.0.0"
+  "codeowners": ["@jeanpijon"],
+  "iot_class": "local_polling",
+  "integration_type": "hub",
+  "config_flow": true,
+  "loggers": ["custom_components.foxtrot_teco"],
+  "platforms": ["climate", "sensor", "switch"]
 }

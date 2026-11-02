@@ -1,178 +1,77 @@
-"""The TecoAPI component."""
-
+from __future__ import annotations
+import hashlib
 import logging
-import json
-import asyncio
-import aiohttp
-import async_timeout
-import voluptuous as vol
-import re
+from datetime import timedelta
 
-import homeassistant.helpers.config_validation as cv
-from homeassistant import config_entries
-from homeassistant.components import persistent_notification
-from homeassistant.helpers import discovery
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.const import (
-    CONF_RESOURCE,
-    CONF_USERNAME,
-    CONF_PASSWORD,
-    CONF_SWITCHES,
-    CONF_SENSORS,
-    CONF_BINARY_SENSORS,
-    CONF_HEADERS,
-    CONF_TIMEOUT,
-    CONF_VERIFY_SSL,
-)
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import (
-    DATA_TECOAPI,
-    DOMAIN,
-    CONF_GETINFO,
-    CONF_GETLIST,
-    DEFAULT_TIMEOUT,
-    DEFAULT_TIMEOUT_WAIT,
-    DEFAULT_VERIFY_SSL,
-    TECOAPI_GETINFO,
-    TECOAPI_GETLIST,
-)
-
-from .switch import SWITCH_SCHEMA
-from .sensor import SENSOR_SCHEMA
-from .binary_sensor import BINARY_SENSOR_SCHEMA
-from .services import async_register_services
-
-TECOAPI_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_RESOURCE): cv.url,
-        vol.Required(CONF_USERNAME): cv.string,
-        vol.Required(CONF_PASSWORD): cv.string,
-        vol.Optional(CONF_HEADERS): {cv.string: cv.string},
-        vol.Optional(CONF_VERIFY_SSL, default = DEFAULT_VERIFY_SSL): cv.boolean,
-        vol.Optional(CONF_TIMEOUT, default = DEFAULT_TIMEOUT): cv.positive_float,
-        vol.Optional(CONF_GETINFO, default = False): cv.boolean,
-        vol.Optional(CONF_GETLIST, default = False): cv.boolean,
-        vol.Optional(CONF_SWITCHES, default = []): vol.All(cv.ensure_list, [vol.Schema(SWITCH_SCHEMA)]),
-        vol.Optional(CONF_SENSORS, default = []): vol.All(cv.ensure_list, [vol.Schema(SENSOR_SCHEMA)]),
-        vol.Optional(CONF_BINARY_SENSORS, default = []): vol.All(cv.ensure_list, [vol.Schema(BINARY_SENSOR_SCHEMA)]),
-    }
-)
-
-CONFIG_SCHEMA = vol.Schema({DOMAIN: TECOAPI_SCHEMA}, extra=vol.ALLOW_EXTRA)
-
-FORWARD_PLATFORMS = { 
-    "switch": CONF_SWITCHES,
-    "sensor": CONF_SENSORS,
-    "binary_sensor": CONF_BINARY_SENSORS,
-}
+from .const import DOMAIN, PLATFORMS
+from .api import TecoApiClient
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup(hass, config):
-    """Configure the Teco TecoAPI component."""
 
-    component_config = config[DOMAIN]
+def make_unique_id(serial: str, kind: int, key: str | None, path: str) -> str:
+    base = f"{serial}|{kind}|{key or path}".encode()
+    return "teco_" + hashlib.sha1(base).hexdigest()[:20]
 
-    hass.data[DATA_TECOAPI] = TecoApiData(hass, component_config)
 
-    if component_config.get(CONF_GETINFO):
-        discovery.load_platform(hass, "sensor", DOMAIN, TECOAPI_GETINFO, config)
-
-    if component_config.get(CONF_GETLIST):
-        discovery.load_platform(hass, "sensor", DOMAIN, TECOAPI_GETLIST, config)
-
-    for platform, pconfig in FORWARD_PLATFORMS.items():
-        if pconfig in component_config:
-            discovery.load_platform(hass, platform, DOMAIN, component_config[pconfig], config)
-
-    if config.get(CONF_GETLIST):
-        discovery.load_platform(hass, "sensor", DOMAIN, TECOAPI_GETINFO, config)
-
-    await async_register_services(hass)
-
-    return True
-
-class TecoApiData:
-    """Holder for TecoApiData data."""
-
-    def __init__(self, hass, config):
-        """Init."""
-        self.hass = hass
-        self.resource = config.get(CONF_RESOURCE)
-        if self.resource[-1] != '/':
-            self.resource += '/'
-
-        username = config.get(CONF_USERNAME)
-        password = config.get(CONF_PASSWORD)
-        self.auth = aiohttp.BasicAuth(username, password=password)
-#        self.authB = requests.auth.HTTPBasicAuth(username, password)
-#        self.authD = requests.auth.HTTPDigestAuth(username, password)
-
-        self.headers = config.get(CONF_HEADERS)
-        self.verify_ssl = config.get(CONF_VERIFY_SSL)
-        self.timeout = config.get(CONF_TIMEOUT)
-        self.parallel_updates_semaphore = asyncio.Semaphore(1)
-
-    async def async_put(self, service, objectid, value):
-        """Send a date to the TecoAPI."""
-        websession = async_get_clientsession(self.hass, self.verify_ssl)
-
-        resource = self.resource + service
-
-        async with self.parallel_updates_semaphore:
-            with async_timeout.timeout(self.timeout):
-                if objectid:
-                    body = json.dumps({objectid: value})
-                else:
-                    body = json.dumps(value)
-
-                req = await websession.put(
-                    resource,
-                    auth = self.auth,
-                    headers = self.headers,
-                    data = bytes(body, "ascii"),
-                )
-
-                if req.status == 204:
-                    return True
-
-                _LOGGER.error(
-                    _LOGGER.debug("TecoApi PUT %s %s failed. Status: %s", service, body, req.status)
-                )
-
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+    data = entry.data
+    host = data.get("host") or data.get("resource")
+    if not host:
+        _LOGGER.error("Missing host/resource in config entry")
         return False
 
-    async def async_get(self, service, objectid, wait):
-        """Get the latest data from TecoAPI."""
-        websession = async_get_clientsession(self.hass, self.verify_ssl)
+    session = async_get_clientsession(hass)
+    client = TecoApiClient(
+        host,
+        session,
+        data.get("username"),
+        data.get("password"),
+        data.get("auth_type", "digest"),
+        data.get("verify_ssl", True),
+    )
 
-        resource = self.resource + service
-        if objectid:
-            resource += '?' + objectid
+    async def _update():
+        try:
+            info = await client.get_info()
+            serial = info.get("plc", {}).get("serialNumber", "unknown")
+            names = await client.get_list(prefix="ha_")
+            out = {}
+            for name in names:
+                obj = await client.get_object(name)
+                face = obj.get(name, {})
+                face["_serial"] = serial
+                face["_var_path"] = name
+                out[name] = face
+            return out
+        except Exception as e:
+            raise UpdateFailed(str(e)) from e
 
-        async with self.parallel_updates_semaphore:
-            with async_timeout.timeout(DEFAULT_TIMEOUT_WAIT if wait else self.timeout):
-                req = await websession.get(
-                    resource,
-                    auth = self.auth,
-                    headers = self.headers,
-                )
+    coordinator = DataUpdateCoordinator(
+        hass,
+        _LOGGER,
+        name=f"{DOMAIN}_coordinator",
+        update_method=_update,
+        update_interval=timedelta(seconds=5),
+    )
+    await coordinator.async_config_entry_first_refresh()
 
-                if req.status == 200:
-                    text = await req.text()
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "client": client,
+        "coordinator": coordinator,
+    }
 
-                    value = json.loads(text)    
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
 
-                    if objectid:
-                        for partid in objectid.split('.'):
-                            partid = re.sub(r'\[(\d+)\]$', '', partid)
-                            value = value[partid]
-                            if type(value) == list:
-                                value = value[0]
-                    return value
 
-            _LOGGER.error(
-                _LOGGER.debug("TecoApi GET %s %s failed. Status: %s, %s", service, objectid, req.status, resource)
-            )
-
-        return None
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+    return unload_ok
