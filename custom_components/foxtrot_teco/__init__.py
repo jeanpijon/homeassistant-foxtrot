@@ -39,8 +39,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     async def _update():
         try:
             info = await client.get_info()
-            serial = info.get("plc", {}).get("serialNumber", "unknown")
+            serial = info.get("plc", {}).get("serialNumber")
+            if not serial:
+                # The serial is part of every entity's unique id and of the device identity:
+                # entities created under a placeholder would be duplicated after the next restart.
+                raise UpdateFailed("GetInfo has no PLC serial number yet (PLC still starting?)")
             names = await client.get_list(prefix="ha_")
+            if not names:
+                # The HTTP server can answer before the PLC program runs. Entities are created
+                # from this first answer, so an empty one would mean no entities until a reload.
+                raise UpdateFailed("TecoApi lists no ha_* objects yet (PLC program not running?)")
             out = {}
             for name in names:
                 obj = await client.get_object(name)
@@ -55,6 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
+        config_entry=entry,
         name=f"{DOMAIN}_coordinator",
         update_method=_update,
         update_interval=timedelta(seconds=5),
