@@ -1,0 +1,85 @@
+{
+  "_comment": "Contract between the PLC program (teco/) and the foxtrot_teco integration. 'types' is checked against the .st source by teco/check_ha_contract.py (CI). 'samples' are illustrative GetObject faces derived from the PLC source, NOT captured from the real controller (to confirm: replace with a real capture). Keep this file identical in the homeautomation repo (teco/) and in homeassistant-foxtrot (tests/fixtures/).",
+  "types": {
+    "T_HA_Sensor": {
+      "kind": 2,
+      "fields": {
+        "name": "STRING",
+        "unit": "STRING",
+        "kind": "INT",
+        "value": "REAL",
+        "key": "STRING"
+      }
+    },
+    "T_HA_Binary": {
+      "kind": 3,
+      "fields": {
+        "name": "STRING",
+        "kind": "INT",
+        "state": "BOOL",
+        "writable": "BOOL",
+        "key": "STRING"
+      }
+    },
+    "T_HA_Climate": {
+      "kind": 1,
+      "fields": {
+        "unit": "STRING",
+        "kind": "INT",
+        "pv": "REAL",
+        "sp": "REAL",
+        "mode": "INT",
+        "writable_sp": "BOOL",
+        "writable_mode": "BOOL",
+        "key": "STRING"
+      }
+    }
+  },
+  "samples": {
+    "ha_livingroom_temp_air": {
+      "name": "",
+      "unit": "1",
+      "kind": 2,
+      "value": 21.5,
+      "key": "livingroom_temp_air"
+    },
+    "ha_livingroom_humidity": {
+      "name": "",
+      "unit": "2",
+      "kind": 2,
+      "value": 45.0,
+      "key": "livingroom_humidity"
+    },
+    "ha_livingroom_co2": {
+      "name": "",
+      "unit": "3",
+      "kind": 2,
+      "value": 640.0,
+      "key": "livingroom_co2"
+    },
+    "ha_livingroom_valves": {
+      "name": "",
+      "kind": 3,
+      "state": true,
+      "writable": false,
+      "key": "livingroom_valves"
+    },
+    "ha_heating_demand": {
+      "name": "",
+      "kind": 3,
+      "state": false,
+      "writable": false,
+      "key": "heating_demand"
+    },
+    "ha_livingroom_climate": {
+      "unit": "",
+      "kind": 1,
+      "pv": 21.4,
+      "sp": 22.0,
+      "mode": 1,
+      "writable_sp": true,
+      "writable_mode": false,
+      "key": "livingroom_thermostat"
+    }
+  }
+}
