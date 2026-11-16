@@ -43,7 +43,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 class TecoClimate(CoordinatorEntity, ClimateEntity):
     _attr_has_entity_name = True
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    # Home Assistant 2026.11 renamed the climate unit attribute; older releases only know the old one.
+    if hasattr(ClimateEntity, "native_temperature_unit"):
+        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+    else:
+        _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(self, coordinator, client, var_path: str):
         super().__init__(coordinator)

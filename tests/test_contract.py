@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from homeassistant.components.climate import ClimateEntityFeature, HVACAction
+from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature, HVACAction
 from homeassistant.components.sensor import SensorDeviceClass
 
 from custom_components.foxtrot_teco.binary_sensor import TecoBinarySensor
@@ -116,3 +116,15 @@ def test_climate_without_writable_setpoint_is_read_only():
     face = dict(SAMPLES[var], writable_sp=False)
     entity = TecoClimate(coordinator_for(**{var: face}), client=None, var_path=var)
     assert ClimateEntityFeature.TARGET_TEMPERATURE not in entity.supported_features
+
+
+def test_climate_declares_its_unit_the_way_this_home_assistant_expects():
+    # _attr_temperature_unit is deprecated from Home Assistant 2026.11 (removed in 2027.11);
+    # older releases only know it. The entity picks whichever the base class supports.
+    var = "ha_livingroom_climate"
+    entity = TecoClimate(coordinator_for(**{var: dict(SAMPLES[var])}), client=None, var_path=var)
+    if hasattr(ClimateEntity, "native_temperature_unit"):
+        assert "_attr_temperature_unit" not in vars(TecoClimate)
+        assert entity.native_temperature_unit == "°C"
+    else:
+        assert entity.temperature_unit == "°C"
