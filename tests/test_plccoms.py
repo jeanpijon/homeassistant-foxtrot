@@ -215,3 +215,44 @@ async def test_nobody_listening_is_a_connection_error():
     c = PlccomsClient("127.0.0.1", 1)
     with pytest.raises(PlccomsConnectionError):
         await c.connect()
+
+
+# ----- files in the PLC (the weekly programs) -------------------------------------------------
+
+
+async def test_a_file_is_read_from_the_plc(client, plc):
+    plc.files["//WWW/IFOX/WTP_1.JSN"] = '{"Name": "Obývák","x": 1}'                 # a diacritic: cp1250
+    assert await client.get_file("WWW/iFOX/WTP_1.JSN") == '{"Name": "Obývák","x": 1}'
+    assert await client.get_file("//WWW/iFOX/WTP_1.JSN") == '{"Name": "Obývák","x": 1}'
+    assert "GETFILE://WWW/iFOX/WTP_1.JSN" in plc.commands
+
+
+async def test_a_file_that_is_not_there_is_a_command_error(client):
+    with pytest.raises(PlccomsCommandError) as err:
+        await client.get_file("WWW/iFOX/NOPE.JSN")
+    assert err.value.code == 41
+
+
+async def test_a_file_is_written_in_one_block_and_closed(client, plc):
+    await client.write_file("WWW/iFOX/WTP_1.APP", '{"a": "ž"}')
+    assert plc.files["//WWW/IFOX/WTP_1.APP"] == '{"a": "ž"}'
+    writes = [c for c in plc.commands if c.startswith("WRITEFILE")]
+    assert writes == ["WRITEFILE://WWW/iFOX/WTP_1.APP[10]={\"a\": \"ž\"}", "WRITEFILE://WWW/iFOX/WTP_1.APP[0]="]
+    await client.write_file("WWW/iFOX/WTP_1.APP", "short")                          # replaces, does not append
+    assert plc.files["//WWW/IFOX/WTP_1.APP"] == "short"
+    assert await client.get_file("WWW/iFOX/WTP_1.APP") == "short"
+
+
+@pytest.mark.parametrize("text", ["two\nlines", "carriage\rreturn", "no cp1250: 😀"])
+async def test_text_that_cannot_be_sent_as_one_line_is_refused_before_anything_goes_out(client, plc, text):
+    with pytest.raises(PlccomsError):
+        await client.write_file("WWW/iFOX/X.APP", text)
+    assert not [c for c in plc.commands if c.startswith("WRITEFILE")]
+
+
+async def test_a_write_the_plc_never_acknowledges_costs_the_connection(client, plc, seen, monkeypatch):
+    monkeypatch.setattr(plccoms, "FILE_TIMEOUT", 0.2)
+    plc.ignore_close = True
+    with pytest.raises(PlccomsConnectionError):
+        await client.write_file("WWW/iFOX/X.APP", "text")
+    assert seen["disconnects"] == 1

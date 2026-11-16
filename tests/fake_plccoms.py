@@ -39,6 +39,7 @@ def parse(text: str, plc_type: str):
 class _Conn:
     def __init__(self, reader, writer):
         self.reader, self.writer = reader, writer
+        self.upload: dict[str, list[str]] = {}
         self.enabled: set[str] = set()
         self.delta: dict[str, float] = {}
 
@@ -55,6 +56,8 @@ class FakePlccoms:
         self.ignore_set = False                  # SET changes nothing and sends nothing (a PLC that refuses)
         self.inject: list[tuple[str, Any]] = []  # (name, value) changes pushed in the middle of the next wildcard GET answer
         self.sims: list[TpwSim] = []             # PLC program parts reacting to SET
+        self.files: dict[str, str] = {}          # the PLC's file system, upper-cased "//path" -> text
+        self.ignore_close = False                # WRITEFILE never gets its OK (the closing block is "lost")
         self.server: asyncio.Server | None = None
         self.port = 0
         self.connections_made = 0
@@ -119,7 +122,7 @@ class FakePlccoms:
     # ----- the server --------------------------------------------------------------------
 
     def _send(self, conn: _Conn, line: str) -> None:
-        conn.writer.write((line + "\r\n").encode())
+        conn.writer.write((line + "\r\n").encode("cp1250"))
 
     def _match(self, pattern: str) -> list[str]:
         return [n for n in self.variables if fnmatch.fnmatchcase(n, pattern.upper())]
@@ -130,7 +133,7 @@ class FakePlccoms:
         self.connections_made += 1
         try:
             while line := await reader.readline():
-                text = line.decode().strip()
+                text = line.decode("cp1250").strip()
                 self.commands.append(text)
                 if not self.mute:
                     self._handle(conn, text)
@@ -188,6 +191,22 @@ class FakePlccoms:
             for sim in self.sims:                # the PLC scan may consume the command at once
                 sim.on_set(name)
             self.announce(before, answer=conn, answered=name)
+        elif command == "GETFILE":
+            if arg.upper() in self.files:
+                text = self.files[arg.upper()]
+                self._send(conn, f"GETFILE:{arg}[{len(text.encode('cp1250'))}]={text}")
+                self._send(conn, f"GETFILE:{arg}[0]=")
+            else:
+                self._send(conn, f"ERROR:41 Unable to get file: '{arg}'")
+        elif command == "WRITEFILE":
+            head, _, data = arg.partition("=")
+            name, _, size = head.rpartition("[")
+            size = int(size.rstrip("]") or 0)
+            if size:
+                conn.upload.setdefault(name.upper(), []).append(data)
+            elif not self.ignore_close:
+                self.files[name.upper()] = "".join(conn.upload.pop(name.upper(), []))
+                self._send(conn, f"WRITEFILE:{name} OK")
         elif command == "GETINFO":
             if arg.upper() == "VERSION_PLC":
                 self._send(conn, "GETINFO:VERSION_PLC,CP2000I   M 2.7 2.0")
@@ -228,8 +247,9 @@ class TpwSim:
     """
 
     def __init__(self, plc: FakePlccoms, prefix: str, name: str, heat_temps=(5.0, 19.0, 21.0, 23.0),
-                 schedule_mode: int = 2, scan_delay: float = 0.0):
+                 schedule_mode: int = 2, scan_delay: float = 0.0, program: str | None = None):
         self.plc, self.prefix = plc, prefix.upper()
+        self.rejected = 0                        # uploads the program refused
         self.heat_temps, self.schedule_mode, self.scan_delay = list(heat_temps), schedule_mode, scan_delay
         self.manual, self.mode, self.delta = False, schedule_mode, 0.0
         self.scans = 0
@@ -240,6 +260,17 @@ class TpwSim:
             "MANUAL": False, "MODE": schedule_mode, "DELTA": 0.0, "HEATTEMP": heat_temps[schedule_mode],
         }
         plc.sims.append(self)
+        if program is not None:
+            plc.files[self.file_key()] = program
+            self.initial["CRC"] = self.crc_of(program)
+
+    def file_key(self, ext: str = "JSN") -> str:
+        return "//" + self.initial["FILE"].upper().rsplit(".", 1)[0] + "." + ext
+
+    @staticmethod
+    def crc_of(text: str) -> int:
+        import zlib
+        return zlib.crc32(text.encode("cp1250")) & 0xFFFF
 
     def variables(self) -> dict[str, tuple[str, Any]]:
         default = {"BOOL": False, "REAL": 0.0, "UINT": 0, "SINT": 0, "USINT": 0, "STRING[24]": ""}
@@ -282,6 +313,9 @@ class TpwSim:
         if get("MODESET") != -1:
             self.mode = max(0, min(3, get("MODESET")))
             put("MODESET", -1)
+        if get("UPDATE"):
+            put("UPDATE", False)
+            self.load_upload()
         inc, dec = get("INCDELTA"), get("DECDELTA")
         if not self.manual and (inc or dec):
             self.manual = True
@@ -298,3 +332,19 @@ class TpwSim:
         put("MODE", self.mode)
         put("DELTA", self.delta)
         put("HEATTEMP", self.heat_temps[self.mode] + self.delta)
+
+    def load_upload(self) -> None:
+        """The program takes the file the app left as .APP (and removes it), or ignores a bad one."""
+        import json
+        text = self.plc.files.pop(self.file_key("APP"), None)
+        if text is None:
+            return
+        try:
+            data = json.loads(text)["timeProgWeekData"]
+            assert len(data["times"]) == 7 and len(data["values"]) == 7
+        except Exception:
+            self.rejected += 1
+            return
+        self.plc.files[self.file_key()] = text
+        self.put("CRC", self.crc_of(text))
+        self.loaded = data

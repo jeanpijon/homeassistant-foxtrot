@@ -14,6 +14,10 @@ about the protocol, as observed on a CP-2000 (PLCComS 5.4):
 * ``ERROR:33 Unknown register name: 'X'``; ``WARNING:250`` means the PLC program (the public
   file) was replaced.
 * Values: BOOL ``1``/``0``, REAL ``23.900000``, STRING ``"text"``.
+* Files in the PLC (``//WWW/iFOX/x.JSN``): ``GETFILE:name`` answers ``GETFILE:name[n]=data`` per block and
+  ends with ``[0]=``; ``WRITEFILE:name[n]=data`` takes a block and ``WRITEFILE:name[0]=`` closes the
+  file, which the server answers with ``WRITEFILE:name OK`` (without the closing block it answers
+  ``ERROR:45`` after a few seconds). Both blocks may go out together. A rewrite replaces the file.
 
 The PLC answers about four commands a second, and two wildcard commands sent back to back may
 lose a terminator, so commands are strictly one at a time.
@@ -35,6 +39,7 @@ DEFAULT_PORT = 5010
 CONNECT_TIMEOUT = 10
 COMMAND_TIMEOUT = 5
 SET_CONFIRM_TIMEOUT = 1.5
+FILE_TIMEOUT = 10
 
 # Always present, never disabled; not listed by the user's public file.
 SYSTEM_TYPES = {"__plc_run": "BOOL", "__pf_crc": "DWORD"}
@@ -92,6 +97,18 @@ def format_value(value: Any, plc_type: str | None) -> str:
     return repr(float(value))
 
 
+def _file_name(path: str) -> str:
+    """A file of the PLC as the server wants it: ``//`` marks the root."""
+    return "//" + path.lstrip("/")
+
+
+def _file_block(rest: str) -> tuple[str, int, str]:
+    """``//WWW/x.JSN[843]=data`` -> (name, 843, data)."""
+    head, _, data = rest.partition("=")
+    name, _, size = head.rpartition("[")
+    return name, int(size.rstrip("]") or 0), data
+
+
 def _split(rest: str) -> tuple[str, str]:
     """``NAME,value`` -> (lower-case name, raw value); a string value may itself contain commas."""
     name, _, value = rest.partition(",")
@@ -100,11 +117,12 @@ def _split(rest: str) -> tuple[str, str]:
 
 @dataclass
 class _Pending:
-    command: str                      # LIST | GET | SET | GETINFO
-    target: str                       # lower-case name, or the pattern
+    command: str                      # LIST | GET | SET | GETINFO | GETFILE | WRITEFILE
+    target: str                       # lower-case name, or the pattern, or the file
     future: asyncio.Future
     wildcard: bool = False
     names: list[str] = field(default_factory=list)
+    chunks: list[str] = field(default_factory=list)       # the blocks of a file being read
 
     def done(self, result=None) -> None:
         if not self.future.done():
@@ -244,6 +262,20 @@ class PlccomsClient:
             name, value = _split(rest)
             if pending and pending.command == "GETINFO" and pending.target == name:
                 pending.done(value.strip())
+        elif command == "GETFILE":
+            name, size, data = _file_block(rest)
+            if pending and pending.command == "GETFILE" and pending.target == name.lower():
+                if size == 0:
+                    pending.done("".join(pending.chunks))
+                elif len(data.encode("cp1250", errors="replace")) != size:
+                    self._pending = None              # a block with a line break inside: not handled
+                    pending.fail(PlccomsError(f"{name} contains line breaks"))
+                else:
+                    pending.chunks.append(data)
+        elif command == "WRITEFILE":
+            name, _, answer = rest.strip().rpartition(" ")
+            if pending and pending.command == "WRITEFILE" and pending.target == name.lower() and answer.upper() == "OK":
+                pending.done()
         elif command == "ERROR":
             code, _, text = rest.strip().partition(" ")
             err = PlccomsCommandError(int(code) if code.isdigit() else 1024, text)
@@ -337,6 +369,23 @@ class PlccomsClient:
             if not _same(convert(text, plc_type), self.values[name]):
                 raise PlccomsError(f"{name} stays {self.values[name]!r} after writing {value!r}") from None
         return self.values[name]
+
+    async def get_file(self, path: str) -> str:
+        """The text of a one-line file in the PLC."""
+        name = _file_name(path)
+        return await self._command(f"GETFILE:{name}", "GETFILE", name.lower(), timeout=FILE_TIMEOUT)
+
+    async def write_file(self, path: str, text: str) -> None:
+        """Write a one-line file into the PLC (replacing it); returns when the PLC says OK."""
+        name = _file_name(path)
+        try:
+            data = text.encode("cp1250")
+        except UnicodeEncodeError as err:
+            raise PlccomsError(f"{name}: the text cannot be written in the PLC's character set") from err
+        if b"\r" in data or b"\n" in data:
+            raise PlccomsError(f"{name}: only a file of one line can be written")
+        await self._command(f"WRITEFILE:{name}[{len(data)}]={text}\nWRITEFILE:{name}[0]=", "WRITEFILE",
+                            name.lower(), timeout=FILE_TIMEOUT)
 
     async def pulse(self, name: str, value: Any) -> None:
         """Write a command variable that the PLC program consumes and resets within a scan.
