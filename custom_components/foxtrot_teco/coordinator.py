@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from . import const
 from .const import CONF_SERIAL, DOMAIN, HA_PREFIX
 from .plccoms import PLC_RUN, PlccomsClient, PlccomsError
+from .schedule import ScheduleError, TimeProgram
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._flush_handle: asyncio.TimerHandle | None = None
         self._task: asyncio.Task | None = None
         self.command_lock = asyncio.Lock()       # one command sequence to the time programs at a time
+        self.programs: dict[str, TimeProgram] = {}   # block path -> its weekly program, as last read
+        self._program_reads: dict[str, asyncio.Task] = {}
 
     # ----- first refresh and supervision -------------------------------------------------
 
@@ -90,11 +93,13 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self._flush_handle is not None:
             self._flush_handle.cancel()
             self._flush_handle = None
-        if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._task
-            self._task = None
+        for task in [self._task, *self._program_reads.values()]:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+        self._task = None
+        self._program_reads.clear()
         await self.client.close()
 
     async def _sync(self) -> dict[str, dict[str, Any]]:
@@ -201,7 +206,14 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return
         if name == PLC_RUN:
             self._wake_up()                      # the supervisor pings and decides
-        elif self._flush_handle is None:
+        elif name.endswith(f".{const.TPW}crc"):
+            self._program_changed(name.rsplit(".", 1)[0])
+            self._schedule_flush()
+        else:
+            self._schedule_flush()
+
+    def _schedule_flush(self) -> None:
+        if self._flush_handle is None:
             self._flush_handle = self.hass.loop.call_later(const.FLUSH_DELAY, self._flush)
 
     def _flush(self) -> None:
@@ -215,7 +227,68 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Current value of a time-program variable (None while unknown)."""
         return self.client.values.get(f"{prefix}.{const.TPW}{field}")
 
-    async def async_pulse(self, prefix: str, field: str, value: Any, effect: Callable[[], bool], what: str) -> None:
+    # ----- weekly programs -----------------------------------------------------------------
+
+    def _program_changed(self, prefix: str) -> None:
+        """The PLC reports another program CRC for this block: read the file again (once at a time)."""
+        if prefix in self._program_reads or prefix not in self.programs:
+            return
+        task = self.config_entry.async_create_background_task(
+            self.hass, self._reread_program(prefix), f"{DOMAIN} program {prefix}")
+        self._program_reads[prefix] = task
+        task.add_done_callback(lambda _: self._program_reads.pop(prefix, None))
+
+    async def _reread_program(self, prefix: str) -> None:
+        try:
+            await self.async_read_program(prefix)
+        except (PlccomsError, ScheduleError) as err:
+            _LOGGER.debug("Cannot read the new program of %s: %s", prefix, err)
+        else:
+            self.async_update_listeners()
+
+    async def async_read_program(self, prefix: str) -> TimeProgram:
+        """The weekly program the PLC runs for this thermostat block (read from its file)."""
+        path = self.tpw(prefix, "file")
+        if not path:
+            raise HomeAssistantError(f"the PLC does not name a program file for {prefix}")
+        try:
+            program = TimeProgram.loads(await self.client.get_file(path))
+        except (PlccomsError, ScheduleError) as err:
+            raise HomeAssistantError(f"cannot read {path}: {err}") from err
+        self.programs[prefix] = program
+        return program
+
+    async def async_load_programs(self) -> None:
+        """Read the program of every thermostat block that belongs to a climate object."""
+        for face in self.data.values():
+            if tpw := face.get("_tpw"):
+                try:
+                    await self.async_read_program(tpw["_prefix"])
+                except HomeAssistantError as err:
+                    _LOGGER.warning("%s", err)
+
+    async def async_write_program(self, prefix: str, program: TimeProgram) -> None:
+        """Have the PLC run ``program`` for this block, as the iFoxtrot app does: leave it as a .APP
+        file next to the program's file, tell the block to load it, and check what the PLC now holds."""
+        async with self.command_lock:
+            path = self.tpw(prefix, "file")
+            if not path:
+                raise HomeAssistantError(f"the PLC does not name a program file for {prefix}")
+            crc = self.tpw(prefix, "crc")
+            try:
+                await self.client.write_file(path.rsplit(".", 1)[0] + ".APP", program.dumps())
+            except PlccomsError as err:
+                raise HomeAssistantError(f"Foxtrot did not take the program for {path}: {err}") from err
+            await self.async_pulse(prefix, "update", True, lambda: self.tpw(prefix, "crc") != crc,
+                                   "load the new weekly program", timeout=const.PROGRAM_TIMEOUT)
+            now = await self.async_read_program(prefix)
+            if (now.week(), now.heat_temp, now.cool_temp, now.holiday) != \
+                    (program.week(), program.heat_temp, program.cool_temp, program.holiday):
+                raise HomeAssistantError(f"Foxtrot loaded the program of {path}, but it differs from what was sent")
+        self.async_update_listeners()
+
+    async def async_pulse(self, prefix: str, field: str, value: Any, effect: Callable[[], bool], what: str,
+                          timeout: float | None = None) -> None:
         """Command a room's time program and wait until the PLC shows ``effect``.
 
         The program consumes a command within a scan and resets it, so a second command must not
@@ -228,14 +301,13 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             await self.client.pulse(f"{prefix}.{const.TPW}{field}", value)
         except PlccomsError as err:
             raise HomeAssistantError(f"Foxtrot did not take the command to {what}: {err}") from err
+        wait = timeout or const.TPW_TIMEOUT
         try:
-            async with asyncio.timeout(const.TPW_TIMEOUT):
+            async with asyncio.timeout(wait):
                 while not effect():
                     await asyncio.sleep(const.TPW_POLL)
         except TimeoutError:
-            raise HomeAssistantError(
-                f"Foxtrot did not {what}: no change reported within {const.TPW_TIMEOUT:g} s"
-            ) from None
+            raise HomeAssistantError(f"Foxtrot did not {what}: no change reported within {wait:g} s") from None
 
     async def async_write(self, var_path: str, field: str, value: Any) -> None:
         """Write one field of an object; the PLC's DIFF (or a read-back) updates the entity."""

@@ -1,6 +1,9 @@
 {
   "domain": "foxtrot_teco",
   "name": "Foxtrot TECO",
+  "after_dependencies": [
+    "schedule"
+  ],
   "codeowners": [
     "@jeanpijon"
   ],
@@ -13,5 +16,5 @@
     "custom_components.foxtrot_teco"
   ],
   "requirements": [],
-  "version": "2.0.0"
+  "version": "2.1.0"
 }

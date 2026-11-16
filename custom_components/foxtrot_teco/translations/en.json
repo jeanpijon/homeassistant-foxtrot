@@ -31,6 +31,58 @@
           }
         }
       }
+    },
+    "number": {
+      "mode_temperature": {
+        "name": "{room} {mode} temperature"
+      }
+    },
+    "date": {
+      "holiday": {
+        "name": "{room} holiday {end}"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Weekly schedule of a thermostat",
+        "description": "Choose the thermostat whose weekly program should follow a Home Assistant schedule helper (or whose link you want to remove).",
+        "data": {
+          "room": "Thermostat"
+        }
+      },
+      "room": {
+        "title": "Schedule of {room}",
+        "description": "Each block of the schedule helper needs the data `mode: comfort`, `sleep`, `eco` or `limit`; times without a block get the mode chosen below. **Linking replaces the weekly program in the PLC with the schedule, and from then on every change of the schedule is sent to the PLC (changes made in the iFoxtrot app are overwritten).** Leave the schedule empty to remove the link.",
+        "data": {
+          "schedule": "Schedule helper",
+          "base_mode": "Mode where the schedule has no block",
+          "confirm": "Replace the thermostat's weekly program in the PLC with this schedule"
+        }
+      }
+    },
+    "error": {
+      "confirm_overwrite": "Confirm that the weekly program in the PLC may be replaced."
+    },
+    "abort": {
+      "no_thermostats": "The PLC publishes no thermostat with a weekly program (a climate object whose prog names its time program)."
+    }
+  },
+  "selector": {
+    "base_mode": {
+      "options": {
+        "comfort": "comfort (day)",
+        "sleep": "sleep (night)",
+        "eco": "eco",
+        "limit": "limit"
+      }
+    }
+  },
+  "issues": {
+    "schedule_not_sent": {
+      "title": "The schedule of {room} was not sent to the PLC",
+      "description": "The weekly program of the thermostat {room} could not be set from the schedule {schedule}: {reason}\n\nThe PLC keeps running the program it has. It is tried again when the schedule changes and every few minutes."
     }
   }
 }

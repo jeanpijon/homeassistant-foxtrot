@@ -10,6 +10,7 @@ from homeassistant.helpers import device_registry as dr
 from .const import CONF_SERIAL, DOMAIN, PLATFORMS
 from .coordinator import FoxtrotCoordinator
 from .plccoms import DEFAULT_PORT
+from .schedule_sync import ScheduleSync
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,14 +29,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         await coordinator.async_shutdown()
         raise
     coordinator.start()
+    await coordinator.async_load_programs()
 
+    sync = ScheduleSync(hass, entry, coordinator)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "client": coordinator.client,
         "coordinator": coordinator,
+        "sync": sync,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    sync.start()
+    entry.async_on_unload(sync.stop)
+    entry.async_on_unload(entry.add_update_listener(_options_changed))
     return True
+
+
+async def _options_changed(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):

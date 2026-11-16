@@ -90,6 +90,58 @@
           }
         }
       }
+    },
+    "number": {
+      "mode_temperature": {
+        "name": "{room} – teplota {mode}"
+      }
+    },
+    "date": {
+      "holiday": {
+        "name": "{room} – dovolená {end}"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Týdenní program termostatu",
+        "description": "Vyberte termostat, jehož týdenní program má následovat plán (schedule) z Home Assistantu, nebo jehož propojení chcete zrušit.",
+        "data": {
+          "room": "Termostat"
+        }
+      },
+      "room": {
+        "title": "Plán pro {room}",
+        "description": "Každý blok plánu musí mít data `mode: comfort`, `sleep`, `eco` nebo `limit`; čas bez bloku dostane režim zvolený níže. **Propojení nahradí týdenní program v automatu plánem a od té doby se každá změna plánu pošle do automatu (změny z aplikace iFoxtrot se přepíšou).** Prázdný plán propojení zruší.",
+        "data": {
+          "schedule": "Plán (schedule)",
+          "base_mode": "Režim tam, kde plán nemá blok",
+          "confirm": "Nahradit týdenní program termostatu v automatu tímto plánem"
+        }
+      }
+    },
+    "error": {
+      "confirm_overwrite": "Potvrďte, že se týdenní program v automatu smí nahradit."
+    },
+    "abort": {
+      "no_thermostats": "Automat nezveřejňuje žádný termostat s týdenním programem (objekt climate, jehož pole prog je jméno časového programu)."
+    }
+  },
+  "selector": {
+    "base_mode": {
+      "options": {
+        "comfort": "comfort (den)",
+        "sleep": "sleep (noc)",
+        "eco": "eco",
+        "limit": "limit"
+      }
+    }
+  },
+  "issues": {
+    "schedule_not_sent": {
+      "title": "Plán pro {room} se nepodařilo poslat do automatu",
+      "description": "Týdenní program termostatu {room} se nepodařilo nastavit podle plánu {schedule}: {reason}\n\nAutomat dál běží podle svého programu. Zkusí se to znovu při změně plánu a pak každých pár minut."
     }
   }
 }

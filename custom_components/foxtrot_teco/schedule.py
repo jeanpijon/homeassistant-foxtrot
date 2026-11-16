@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, replace
+from datetime import time
 from typing import Any
 
 from .thermostat import MODE_PRESETS, PRESET_MODES
@@ -31,10 +32,13 @@ class ScheduleError(ValueError):
     """The program or the helper cannot be turned into the other."""
 
 
-def _seconds(text: str) -> int:
-    match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{1,2})(?:\.\d+)?)?", text.strip())
+def _seconds(value: str | time) -> int:
+    """A time of day as text ("06:15:00") or as the ``datetime.time`` the schedule helper gives in-process."""
+    if isinstance(value, time):
+        return value.hour * 3600 + value.minute * 60 + value.second
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{1,2})(?:\.\d+)?)?", str(value).strip())
     if not match:
-        raise ScheduleError(f"not a time of day: {text!r}")
+        raise ScheduleError(f"not a time of day: {value!r}")
     hours, minutes, seconds = int(match[1]), int(match[2]), int(match[3] or 0)
     return hours * 3600 + minutes * 60 + seconds
 
@@ -48,7 +52,7 @@ def _hms(seconds: int) -> str:
     return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
 
 
-def _end_of_block(text: str) -> int:
+def _end_of_block(text: str | time) -> int:
     """The end of a helper block; Home Assistant may say 24:00:00 or just before midnight."""
     seconds = _seconds(text)
     return DAY if seconds >= DAY - 1 else seconds

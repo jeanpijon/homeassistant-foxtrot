@@ -116,6 +116,13 @@ def test_a_block_may_end_at_midnight_either_way():
         assert week[1] == [(0, "eco"), (20 * H, "sleep")]
 
 
+def test_the_times_of_the_real_helper_are_time_objects_and_midnight_is_the_largest_of_them():
+    from datetime import time
+    schedule = week_of(monday=[block(time(6, 0), time(8, 30), "comfort"), block(time(20, 0), time.max, "sleep")])
+    assert week_from_helper(schedule, "eco")[0] == [(0, "eco"), (6 * H, "comfort"), (8 * H + 1800, "eco"),
+                                                      (20 * H, "sleep")]
+
+
 @pytest.mark.parametrize("schedule, message", [
     (week_of(monday=[block("06:00:00", "08:00:00")]), "needs data mode"),
     (week_of(monday=[block("06:00:00", "08:00:00", "boost")]), "needs data mode"),

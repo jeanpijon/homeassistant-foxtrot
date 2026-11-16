@@ -12,6 +12,9 @@ HA_PREFIX = "ha_"
 # iFoxtrot also uses. They are found by name and tied to a climate object through its ``prog`` field.
 TPW = "gtsap1_tpw_"
 TPW_TIMEOUT = 3.0        # s the PLC gets to show the effect of a command
+PROGRAM_TIMEOUT = 20.0   # s the PLC gets to load a new weekly program (it writes three files)
+SYNC_DEBOUNCE = 2.0      # s after the last change of a schedule helper before it is sent to the PLC
+CONF_SCHEDULES = "schedules"   # options: {time program name: {"entity_id": schedule helper, "base_mode": preset}}
 TPW_POLL = 0.05          # s between looks at the values while waiting for it
 
 # A REAL is pushed only when it moved by more than this (the entities show one decimal at most).
@@ -29,6 +32,7 @@ KIND_CLIMATE = 1
 KIND_SENSOR = 2
 KIND_SWITCH = 3
 
-PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR, Platform.NUMBER,
+             Platform.DATE]
 
 UNIT2DEVICE_CLASS = {"0": (None, None,0),"1": (SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS,1), "2": (SensorDeviceClass.HUMIDITY, "%",0), "3": (SensorDeviceClass.CO2, "ppm",0)}

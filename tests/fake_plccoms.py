@@ -250,6 +250,7 @@ class TpwSim:
                  schedule_mode: int = 2, scan_delay: float = 0.0, program: str | None = None):
         self.plc, self.prefix = plc, prefix.upper()
         self.rejected = 0                        # uploads the program refused
+        self.reject = False                      # ignore every upload (a block that does not react)
         self.heat_temps, self.schedule_mode, self.scan_delay = list(heat_temps), schedule_mode, scan_delay
         self.manual, self.mode, self.delta = False, schedule_mode, 0.0
         self.scans = 0
@@ -337,7 +338,7 @@ class TpwSim:
         """The program takes the file the app left as .APP (and removes it), or ignores a bad one."""
         import json
         text = self.plc.files.pop(self.file_key("APP"), None)
-        if text is None:
+        if text is None or self.reject:
             return
         try:
             data = json.loads(text)["timeProgWeekData"]

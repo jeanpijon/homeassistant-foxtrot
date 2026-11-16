@@ -53,9 +53,21 @@ If a climate object's `prog` field holds the name of a thermostat's time program
 - **Presets:** `schedule` (follow the weekly program, *auto*), `comfort` (day), `sleep` (night), `eco` and `limit`. Choosing one of the last four makes the room manual in that mode. **A manual setting ends by itself at the next switch time of the weekly program**, as in the app. `hvac_mode` *auto* is the same as `schedule`.
 - **Setpoint:** moves in 0.5 K steps, at most 5 K either way from the current mode's program temperature (that is the range Home Assistant offers). Each step is a command the PLC confirms before the next goes out, so a large change takes a few seconds. Setting a temperature while the room is in *schedule* makes it manual, as in the app.
 - **Attributes:** `holiday` (the program's holiday period is on) and `delta` (the offset in K).
-- The weekly program itself is not edited here yet.
+- **Temperatures and holiday:** for each such thermostat there are four `number` entities (the heating temperature of the modes `limit`, `eco`, `sleep` and `comfort`) and two `date` entities (first and last day of the holiday, during which the PLC runs `eco`; a period in the past has no effect). They are stored in the weekly program, so a change goes to the PLC the way the app sends one.
 
-Without `prog`, or when the program is not published by the PLC (or two have the same name), the climate entity falls back to writing `sp`, which the PLC program may overwrite.
+### Weekly schedule
+
+The weekly program (which mode applies when) can be edited in Home Assistant with a **Schedule helper** (Settings, Devices & services, Helpers, Schedule), one per thermostat, as a drag-and-draw weekly calendar:
+
+1. In the helper, give every block the *Additional data* `mode: comfort` (or `sleep`, `eco`, `limit`). Times without a block get the mode you choose when linking.
+2. In the integration's **Configure** dialog pick the thermostat, the helper and that mode, and confirm. **From then on the helper is the master:** the weekly program in the PLC is replaced by it whenever the helper changes and every 5 minutes; a change made in the iFoxtrot app is overwritten. Leave the helper empty in that dialog to unlink.
+3. The PLC keeps running the program by itself; Home Assistant being down changes nothing. The temperatures and the holiday are not part of the helper (see the entities above) and are kept.
+
+A day can have at most five intervals (what the PLC's block holds). A schedule that cannot be sent (a block without `mode`, overlapping blocks, too many intervals, a PLC that does not load it) raises a repair issue that names the reason, and nothing is written. Mind that the PLC names the program file after the thermostat's name: renaming a thermostat in the PLC program loses its program (see `teco/README.md` in the home automation repository).
+
+How it is done: the program is the PLC's own JSON file (`WWW/iFOX/WTP_<CRC-16 of the name>.JSN`); a new one is written as `.APP` next to it through PLCComS and loaded by the block's `update` command, exactly as the app does, and the integration then reads back what the PLC holds.
+
+Without `prog`, or when the program is not published by the PLC (or two have the same name), the climate entity falls back to writing `sp`, which the PLC program may overwrite, and there are no presets, temperatures or schedule.
 
 ## How it behaves
 
