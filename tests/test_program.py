@@ -118,3 +118,13 @@ async def test_a_program_changed_by_someone_else_is_read_again(hass, entry, plc)
     plc.files[plc.sim.file_key()] = text
     plc.push(f"{PREFIX}.GTSAP1_TPW_CRC", 4321)                          # the app saved it: the crc moves
     await until(hass, lambda: float(temperature(hass, entry, 3)[1].state) == 25.0)
+
+
+async def test_a_program_changed_while_the_link_was_down_is_read_again_afterwards(hass, entry, plc):
+    from dataclasses import replace
+    await start(hass, entry)
+    assert float(temperature(hass, entry, 3)[1].state) == 24.0
+    await plc.drop()
+    plc.files[plc.sim.file_key()] = replace(TimeProgram.loads(OBYVAK), heat_temp=(21.0, 21.0, 21.0, 26.0)).dumps()
+    plc.variables[f"{PREFIX}.GTSAP1_TPW_CRC".upper()] = ("UINT", 999)         # no push: nobody was listening
+    await until(hass, lambda: temperature(hass, entry, 3)[1].state == "26.0")      # unavailable while away

@@ -75,6 +75,7 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.command_lock = asyncio.Lock()       # one command sequence to the time programs at a time
         self.programs: dict[str, TimeProgram] = {}   # block path -> its weekly program, as last read
         self._program_reads: dict[str, asyncio.Task] = {}
+        self._program_crcs: dict[str, Any] = {}      # the CRC the PLC reported when each program was read
 
     # ----- first refresh and supervision -------------------------------------------------
 
@@ -177,6 +178,7 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     self._attention.clear()
                     faces = await self._sync()
                     self.async_set_updated_data(faces)
+                    self._check_programs()
                     _LOGGER.info("Connected to the PLC at %s: %d objects", self.client.host, len(faces))
                     delay = const.RECONNECT_MIN
             except asyncio.CancelledError:
@@ -195,6 +197,7 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self._attention.is_set() or time.monotonic() - self._synced_at >= const.RESYNC_INTERVAL:
             self._attention.clear()
             self.async_set_updated_data(await self._load())
+            self._check_programs()
 
     # ----- callbacks from the client -----------------------------------------------------
 
@@ -229,9 +232,18 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     # ----- weekly programs -----------------------------------------------------------------
 
+    def _program_blocks(self) -> set[str]:
+        return {face["_tpw"]["_prefix"] for face in (self.data or {}).values() if face.get("_tpw")}
+
+    def _check_programs(self) -> None:
+        """After a (re)connection or a re-read: a program whose CRC moved while nobody listened is read again."""
+        for prefix in self._program_blocks():
+            if self._program_crcs.get(prefix) != self.tpw(prefix, "crc"):
+                self._program_changed(prefix)
+
     def _program_changed(self, prefix: str) -> None:
         """The PLC reports another program CRC for this block: read the file again (once at a time)."""
-        if prefix in self._program_reads or prefix not in self.programs:
+        if prefix in self._program_reads or prefix not in self._program_blocks():
             return
         task = self.config_entry.async_create_background_task(
             self.hass, self._reread_program(prefix), f"{DOMAIN} program {prefix}")
@@ -251,11 +263,13 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         path = self.tpw(prefix, "file")
         if not path:
             raise HomeAssistantError(f"the PLC does not name a program file for {prefix}")
+        crc = self.tpw(prefix, "crc")
         try:
             program = TimeProgram.loads(await self.client.get_file(path))
         except (PlccomsError, ScheduleError) as err:
             raise HomeAssistantError(f"cannot read {path}: {err}") from err
         self.programs[prefix] = program
+        self._program_crcs[prefix] = crc
         return program
 
     async def async_load_programs(self) -> None:
