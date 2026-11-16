@@ -18,6 +18,7 @@ from homeassistant.components.sensor import SensorDeviceClass
 from custom_components.foxtrot_teco.binary_sensor import TecoBinarySensor
 from custom_components.foxtrot_teco.climate import TecoClimate
 from custom_components.foxtrot_teco.const import UNIT2DEVICE_CLASS
+from custom_components.foxtrot_teco.coordinator import faces_from_values
 from custom_components.foxtrot_teco.sensor import TecoSensor
 
 CONTRACT = json.loads((Path(__file__).parent / "fixtures" / "ha_contract.json").read_text())
@@ -66,6 +67,18 @@ def test_samples_follow_their_types():
         type_name = by_kind[face["kind"]]
         assert set(face) <= TYPES[type_name], f"{var} has fields outside {type_name}"
         assert set(face) == TYPES[type_name], f"{var} lacks fields of {type_name}"
+
+
+def test_flat_plccoms_variables_make_the_faces_of_the_samples():
+    # PLCComS lists ha_x.field variables, upper-cased; the faces must come out as the samples.
+    from fake_plccoms import variables_from_contract
+    values = {name.lower(): value for name, (_, value) in variables_from_contract(CONTRACT).items()}
+    values["ha_without_kind.value"] = 1.0                      # cannot be classified: skipped
+    faces = faces_from_values(values, "M5 0075")
+    assert set(faces) == set(SAMPLES)
+    for var, sample in SAMPLES.items():
+        assert {k: v for k, v in faces[var].items() if k not in INTERNAL} == sample
+        assert faces[var]["_serial"] == "M5 0075" and faces[var]["_var_path"] == var
 
 
 def test_sensor_unit_codes_used_by_the_plc_are_known():

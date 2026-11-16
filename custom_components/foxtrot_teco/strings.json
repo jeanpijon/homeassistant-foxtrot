@@ -3,20 +3,20 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to TECO Web API",
+        "title": "Connect to the Foxtrot PLC",
+        "description": "PLCComS, the PLC's communication server (port 5010), must serve a public file that contains the ha_* variables.",
         "data": {
-          "resource": "Base URL (e.g. http://PLC-IP/TecoApi/)",
-          "auth_type": "Auth",
-          "username": "Username",
-          "password": "Password",
-          "verify_ssl": "Verify SSL",
-          "scan_interval": "Scan interval (s)"
+          "host": "Host/IP of the PLC",
+          "port": "PLCComS port"
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect or invalid response."
+      "cannot_connect": "Cannot reach PLCComS on that address and port.",
+      "no_ha_objects": "Connected, but PLCComS lists no ha_* variables. Publish them in the public file it serves (see the README)."
     },
-    "abort": {}
+    "abort": {
+      "already_configured": "This PLC is already configured."
+    }
   }
 }

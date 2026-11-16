@@ -85,8 +85,8 @@ class TecoBinarySensor(CoordinatorEntity, BinarySensorEntity):
     # ----- entity API ------------------------------------------------------
     @property
     def available(self) -> bool:
-        # present if path exists in the latest coordinator snapshot
-        return self._path in self.coordinator.data
+        # the link is up and the path exists in the latest coordinator snapshot
+        return super().available and self._path in self.coordinator.data
 
     @property
     def is_on(self) -> bool:

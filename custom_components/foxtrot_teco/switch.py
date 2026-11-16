@@ -62,8 +62,8 @@ class TecoSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        # consider face present if it's in coordinator data
-        return self._path in self.coordinator.data
+        # the link is up and the face is present
+        return super().available and self._path in self.coordinator.data
 
     @property
     def is_on(self) -> bool:
@@ -75,17 +75,11 @@ class TecoSwitch(CoordinatorEntity, SwitchEntity):
         return bool(val)
 
     async def async_turn_on(self, **kwargs):
-        await self._client.set_object(self._path, {"state": True})
-        # optimistic update, then refresh
-        self._face()["state"] = True
-        self.async_write_ha_state()
-        await self.coordinator.async_request_refresh()
+        # The PLC confirms with a push, which updates the entity.
+        await self.coordinator.async_write(self._path, "state", True)
 
     async def async_turn_off(self, **kwargs):
-        await self._client.set_object(self._path, {"state": False})
-        self._face()["state"] = False
-        self.async_write_ha_state()
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_write(self._path, "state", False)
 
     def _handle_coordinator_update(self) -> None:
         self._update_from_face()

@@ -3,25 +3,19 @@ from homeassistant.const import Platform, UnitOfTemperature
 
 DOMAIN = "foxtrot_teco"
 
-CONF_RESOURCE = "resource"
-CONF_USERNAME = "username"
-CONF_PASSWORD = "password"
-CONF_AUTH_TYPE = "auth_type"
-CONF_VERIFY_SSL = "verify_ssl"
-CONF_SCAN_INTERVAL = "scan_interval"
+CONF_SERIAL = "serial"
 
-DEFAULT_VERIFY_SSL = False
-AUTH_NONE = "none"
-AUTH_BASIC = "basic"
-AUTH_DIGEST = "digest"   # default
-AUTH_AUTO = "auto"       # try digest then basic
-DEFAULT_SCAN_INTERVAL = 5  # seconds
+# PLC objects that become entities: structs named "ha_<name>" whose fields are "ha_<name>.<field>".
+HA_PREFIX = "ha_"
 
-# Discovery: match nested faces like "<prefix>.HA.<leaf>"
-HA_NESTED_PATTERN = r"^(?P<prefix>.+)\.HA\.(?P<leaf>\w+)$"
+# A REAL is pushed only when it moved by more than this (the entities show one decimal at most).
+REAL_DELTA = 0.1
 
-# Minimal field set a face may expose
-FACE_FIELDS_POLL = ("avail", "name", "unit", "pv", "sp", "mode", "kind", "writable_sp", "writable_mode")
+PING_INTERVAL = 30       # s between checks that the PLC program runs (also proves the link is alive)
+RESYNC_INTERVAL = 300    # s between full re-reads, in case a push was lost
+RECONNECT_MIN = 5        # s, doubled up to RECONNECT_MAX while the PLC stays away
+RECONNECT_MAX = 60
+FLUSH_DELAY = 0.1        # s: pushes arriving together become one state update
 
 # kind values (optional; we also infer)
 KIND_NONE = 0
@@ -32,4 +26,3 @@ KIND_SWITCH = 3
 PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR]
 
 UNIT2DEVICE_CLASS = {"0": (None, None,0),"1": (SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS,1), "2": (SensorDeviceClass.HUMIDITY, "%",0), "3": (SensorDeviceClass.CO2, "ppm",0)}
-

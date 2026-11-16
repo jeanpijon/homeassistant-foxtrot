@@ -1,15 +1,15 @@
 from __future__ import annotations
 import hashlib
 import logging
-from datetime import timedelta
+from urllib.parse import urlparse
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, PLATFORMS
-from .api import TecoApiClient
+from .const import CONF_SERIAL, DOMAIN, PLATFORMS
+from .coordinator import FoxtrotCoordinator
+from .plccoms import DEFAULT_PORT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,58 +20,17 @@ def make_unique_id(serial: str, kind: int, key: str | None, path: str) -> str:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    data = entry.data
-    host = data.get("host") or data.get("resource")
-    if not host:
-        _LOGGER.error("Missing host/resource in config entry")
-        return False
-
-    session = async_get_clientsession(hass)
-    client = TecoApiClient(
-        host,
-        session,
-        data.get("username"),
-        data.get("password"),
-        data.get("auth_type", "digest"),
-        data.get("verify_ssl", True),
-    )
-
-    async def _update():
-        try:
-            info = await client.get_info()
-            serial = info.get("plc", {}).get("serialNumber")
-            if not serial:
-                # The serial is part of every entity's unique id and of the device identity:
-                # entities created under a placeholder would be duplicated after the next restart.
-                raise UpdateFailed("GetInfo has no PLC serial number yet (PLC still starting?)")
-            names = await client.get_list(prefix="ha_")
-            if not names:
-                # The HTTP server can answer before the PLC program runs. Entities are created
-                # from this first answer, so an empty one would mean no entities until a reload.
-                raise UpdateFailed("TecoApi lists no ha_* objects yet (PLC program not running?)")
-            out = {}
-            for name in names:
-                obj = await client.get_object(name)
-                face = obj.get(name, {})
-                face["_serial"] = serial
-                face["_var_path"] = name
-                out[name] = face
-            return out
-        except Exception as e:
-            raise UpdateFailed(str(e)) from e
-
-    coordinator = DataUpdateCoordinator(
-        hass,
-        _LOGGER,
-        config_entry=entry,
-        name=f"{DOMAIN}_coordinator",
-        update_method=_update,
-        update_interval=timedelta(seconds=5),
-    )
-    await coordinator.async_config_entry_first_refresh()
+    coordinator = FoxtrotCoordinator(hass, entry)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except BaseException:
+        # Not ready (PLC down, program not running): HA retries; don't leave the connection open.
+        await coordinator.async_shutdown()
+        raise
+    coordinator.start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "client": client,
+        "client": coordinator.client,
         "coordinator": coordinator,
     }
 
@@ -82,5 +41,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        store = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if store:
+            await store["coordinator"].async_shutdown()
     return unload_ok
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """1.x talked to TecoApi over HTTP (URL, login); 2.x talks to PLCComS (host, port).
+
+    Entity unique ids hash the PLC serial number, which only TecoApi could tell; 2.x takes it over
+    from the device that 1.x registered, so entities, history and the device stay as they are.
+    """
+    if entry.version == 1:
+        old = entry.data.get("host") or entry.data.get("resource") or ""
+        host = urlparse(old if "://" in old else f"//{old}").hostname
+        if not host:
+            _LOGGER.error("Cannot migrate the Foxtrot entry: no host in %r", old)
+            return False
+        registry = dr.async_get(hass)
+        serials = sorted(
+            ident
+            for device in dr.async_entries_for_config_entry(registry, entry.entry_id)
+            for domain, ident in device.identifiers
+            if domain == DOMAIN and ident != "unknown"
+        )
+        serial = serials[0] if serials else host
+        hass.config_entries.async_update_entry(
+            entry,
+            data={"host": host, "port": DEFAULT_PORT, CONF_SERIAL: serial},
+            unique_id=f"{DOMAIN}:{host}:{DEFAULT_PORT}",
+            version=2,
+        )
+        _LOGGER.info("Migrated the Foxtrot entry to PLCComS at %s:%d (serial %s)", host, DEFAULT_PORT, serial)
+    return True

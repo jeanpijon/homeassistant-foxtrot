@@ -101,8 +101,5 @@ class TecoClimate(CoordinatorEntity, ClimateEntity):
         temp = kwargs.get("temperature")
         if temp is None:
             return
-        await self._client.set_object(self._path, {"sp": float(temp)})
-        # optimistic local update; coordinator will refresh
-        self._attr_target_temperature = float(temp)
-        self.async_write_ha_state()
-        await self.coordinator.async_request_refresh()
+        # The PLC confirms with a push, which updates the entity.
+        await self.coordinator.async_write(self._path, "sp", float(temp))
