@@ -219,6 +219,35 @@ async def test_a_reloaded_program_with_new_objects_reloads_the_entry(hass, entry
     assert entry.state is ConfigEntryState.LOADED
 
 
+async def test_a_program_that_drops_objects_reloads_the_entry(hass, entry, plc):
+    await start(hass, entry)
+    before = coordinator(hass, entry)
+    assert "ha_livingroom_co2" in before.data
+    await plc.replace_program({k: v for k, v in plc.variables.items() if "LIVINGROOM_CO2" not in k})
+    await until(hass, lambda: coordinator(hass, entry) is not before)
+    await until(hass, lambda: entry.state is ConfigEntryState.LOADED)
+    assert "ha_livingroom_co2" not in coordinator(hass, entry).data
+
+
+async def test_a_refresh_while_connected_rereads_without_reconnecting(hass, entry, plc):
+    await start(hass, entry)
+    assert plc.connections_made == 1
+    await coordinator(hass, entry).async_refresh()
+    assert plc.connections_made == 1
+    plc.push(f"{AIR}.value", 27.0)                    # the pushes still come
+    await until(hass, lambda: state_of(hass, entry, "sensor", AIR).state == "27.0")
+
+
+async def test_a_write_that_finds_the_link_dead_makes_the_entities_unavailable_at_once(hass, entry, plc, monkeypatch):
+    monkeypatch.setattr(const, "PING_INTERVAL", 30)    # so only the failed write can have noticed
+    await start(hass, entry)
+    plc.mute = True
+    eid = entity_id(hass, entry, "switch", "ha_garage_light")
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call("switch", "turn_on", {"entity_id": eid}, blocking=True)
+    await until(hass, lambda: hass.states.get(eid).state == "unavailable", timeout=2)
+
+
 async def test_a_setpoint_written_in_home_assistant_reaches_the_plc(hass, entry, plc):
     await start(hass, entry)
     eid = entity_id(hass, entry, "climate", CLIMATE)

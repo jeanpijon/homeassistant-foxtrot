@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import logging
 import socket
 from collections.abc import Callable
@@ -290,6 +291,8 @@ class PlccomsClient:
                 if not drop_on_timeout:
                     raise
                 await self.close()
+                if self.on_disconnect:
+                    self.on_disconnect()          # nobody else will notice that the link is gone
                 raise PlccomsConnectionError(f"no answer to {line!r}") from None
             finally:
                 if self._pending is pending:
@@ -298,6 +301,10 @@ class PlccomsClient:
     async def list_variables(self, pattern: str) -> dict[str, str]:
         """Variables matching ``pattern`` (all of them, enabled or not) as name -> PLC type."""
         names = await self._command(f"LIST:{pattern}", "LIST", pattern.lower(), wildcard=True)
+        # What the PLC no longer lists (a new program) must not linger in what we remember.
+        for name in [n for n in self.values if fnmatch.fnmatchcase(n, pattern.lower()) and n not in names]:
+            del self.values[name]
+            self.types.pop(name, None)
         return {name: self.types[name] for name in names}
 
     async def enable(self, pattern: str, delta: float | None = None) -> None:

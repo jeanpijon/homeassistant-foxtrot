@@ -55,6 +55,7 @@ class FakePlccoms:
         self.inject: list[tuple[str, Any]] = []  # (name, value) changes pushed in the middle of the next wildcard GET answer
         self.server: asyncio.Server | None = None
         self.port = 0
+        self.connections_made = 0
 
     def set_variables(self, variables: dict[str, tuple[str, Any]]) -> None:
         self.variables = {name.upper(): v for name, v in {**SYSTEM, **variables}.items()}
@@ -111,6 +112,7 @@ class FakePlccoms:
     async def _serve(self, reader, writer):
         conn = _Conn(reader, writer)
         self.conns.append(conn)
+        self.connections_made += 1
         try:
             while line := await reader.readline():
                 text = line.decode().strip()

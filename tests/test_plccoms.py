@@ -91,6 +91,19 @@ async def test_list_gives_names_and_types_without_the_disabled_marker(client):
     assert all(name == name.lower() for name in found)
 
 
+async def test_what_the_plc_stops_listing_is_forgotten(client, plc):
+    await client.list_variables("ha_*")
+    await client.enable("ha_*")
+    await client.snapshot("ha_*")
+    assert "ha_valve.state" in client.values
+
+    await plc.replace_program({k: v for k, v in VARS.items() if not k.startswith("ha_valve")})
+    await asyncio.sleep(0.05)
+    assert "ha_valve.state" not in await client.list_variables("ha_*")
+    assert "ha_valve.state" not in client.values and "ha_valve.state" not in client.types
+    assert "ha_room.value" in client.types
+
+
 async def test_a_wildcard_read_returns_only_enabled_variables(client):
     await client.list_variables("ha_*")
     assert await client.snapshot("ha_*") == []
@@ -174,12 +187,13 @@ async def test_unknown_names_are_command_errors(client):
     assert client.connected                       # the answer was an error, not silence
 
 
-async def test_a_silent_plc_costs_the_connection(client, plc, monkeypatch):
+async def test_a_silent_plc_costs_the_connection_and_the_owner_hears_of_it(client, plc, seen, monkeypatch):
     monkeypatch.setattr(plccoms, "COMMAND_TIMEOUT", 0.2)
     plc.mute = True
     with pytest.raises(PlccomsConnectionError):
         await client.get("__plc_run")
     assert not client.connected
+    assert seen["disconnects"] == 1
 
 
 async def test_losing_the_connection_is_reported_and_fails_what_waits(client, plc, seen):

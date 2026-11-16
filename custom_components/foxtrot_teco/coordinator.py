@@ -87,7 +87,8 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def _sync(self) -> dict[str, dict[str, Any]]:
         """(Re)connect, read everything, and have the PLC push changes from now on."""
         try:
-            await self.client.connect()
+            if not self.client.connected:
+                await self.client.connect()
             return await self._load()
         except Exception as err:
             await self.client.close()
@@ -114,7 +115,7 @@ class FoxtrotCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             raise UpdateFailed(f"PLCComS returned {len(answered)} of {len(variables)} variables "
                                f"(not enabled: {', '.join(sorted(missing)[:3])}...)")
 
-        faces = faces_from_values(client.values, self.serial)
+        faces = faces_from_values({n: client.values[n] for n in variables if n in client.values}, self.serial)
         skipped = {m["obj"] for name in variables if (m := FIELD_RE.match(name))} - set(faces)
         if skipped:
             _LOGGER.warning("Ignoring PLC objects without a 'kind' field: %s", ", ".join(sorted(skipped)))
