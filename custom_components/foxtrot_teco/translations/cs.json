@@ -78,6 +78,18 @@
       "ha_sauna_humidity": {
         "name": "Sauna – vlhkost"
       }
+    },
+    "climate": {
+      "thermostat": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "schedule": "Časový program",
+              "limit": "Limit"
+            }
+          }
+        }
+      }
     }
   }
 }

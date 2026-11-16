@@ -18,5 +18,19 @@
     "abort": {
       "already_configured": "This PLC is already configured."
     }
+  },
+  "entity": {
+    "climate": {
+      "thermostat": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "schedule": "Schedule",
+              "limit": "Limit"
+            }
+          }
+        }
+      }
+    }
   }
 }

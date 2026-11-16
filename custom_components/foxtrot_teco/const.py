@@ -8,6 +8,12 @@ CONF_SERIAL = "serial"
 # PLC objects that become entities: structs named "ha_<name>" whose fields are "ha_<name>.<field>".
 HA_PREFIX = "ha_"
 
+# The room thermostats' time programs (iControlLib fb_iTimeProgWeek): GTSAP1_TPW_* variables, which
+# iFoxtrot also uses. They are found by name and tied to a climate object through its ``prog`` field.
+TPW = "gtsap1_tpw_"
+TPW_TIMEOUT = 3.0        # s the PLC gets to show the effect of a command
+TPW_POLL = 0.05          # s between looks at the values while waiting for it
+
 # A REAL is pushed only when it moved by more than this (the entities show one decimal at most).
 REAL_DELTA = 0.1
 

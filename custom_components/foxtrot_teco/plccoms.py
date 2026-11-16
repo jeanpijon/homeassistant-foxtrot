@@ -338,6 +338,18 @@ class PlccomsClient:
                 raise PlccomsError(f"{name} stays {self.values[name]!r} after writing {value!r}") from None
         return self.values[name]
 
+    async def pulse(self, name: str, value: Any) -> None:
+        """Write a command variable that the PLC program consumes and resets within a scan.
+
+        The reset can win against the server's next poll, so no ``DIFF`` may ever show the value:
+        silence is normal here, and checking the effect is up to the caller. Only an ``ERROR`` fails.
+        """
+        name = name.lower()
+        text = format_value(value, self.types.get(name))
+        with contextlib.suppress(TimeoutError):
+            await self._command(f"SET:{name},{text}", "SET", name,
+                                timeout=SET_CONFIRM_TIMEOUT, drop_on_timeout=False)
+
     async def ping(self) -> bool:
         """Is the PLC program running? Also proves the link is alive."""
         return bool(await self.get(PLC_RUN))

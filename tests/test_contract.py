@@ -33,7 +33,7 @@ PLATFORM_TYPES = {
     "switch.py": ["T_HA_Binary"],
     "climate.py": ["T_HA_Climate"],
 }
-INTERNAL = {"_serial", "_var_path"}          # added by the integration, not by the PLC
+INTERNAL = {"_serial", "_var_path", "_tpw"}  # added by the integration, not by the PLC
 # Read, but the integration copes when the PLC does not provide them (falls back to a default).
 OPTIONAL = {"climate.py": {"name"}, "binary_sensor.py": {"device_class"}}
 

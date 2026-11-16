@@ -31,7 +31,8 @@
         "mode": "INT",
         "writable_sp": "BOOL",
         "writable_mode": "BOOL",
-        "key": "STRING"
+        "key": "STRING",
+        "prog": "STRING"
       }
     }
   },
@@ -79,7 +80,8 @@
       "mode": 1,
       "writable_sp": true,
       "writable_mode": false,
-      "key": "livingroom_thermostat"
+      "key": "livingroom_thermostat",
+      "prog": "Obyvak"
     }
   }
 }

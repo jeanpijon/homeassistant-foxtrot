@@ -37,7 +37,7 @@ On setup (and again on reload) the integration lists the PLC variables whose nam
 
 | `kind` | PLC type | Home Assistant entity |
 |---|---|---|
-| 1 | `T_HA_Climate` | `climate`: current temperature `pv`, target `sp`, action from `mode` |
+| 1 | `T_HA_Climate` | `climate`: current temperature `pv`, target `sp`, action from `mode`; with `prog` set, also presets and a setpoint the PLC keeps (see Thermostats) |
 | 2 | `T_HA_Sensor` | `sensor`: `value`, with device class and unit from the `unit` code |
 | 3, `writable` false | `T_HA_Binary` | `binary_sensor`: `state` |
 | 3, `writable` true | `T_HA_Binary` | `switch`: `state` (on/off writes `state`) |
@@ -45,6 +45,17 @@ On setup (and again on reload) the integration lists the PLC variables whose nam
 Sensor `unit` codes: `0` none, `1` °C (temperature), `2` % (humidity), `3` ppm (CO2).
 
 Entities hang under one device per PLC. The entity name is the object's `name` if the PLC sets one, otherwise the variable name. The unique id is a hash of the device identity, kind and the object's `key` (or its variable name if `key` is empty): **keep `key` stable in the PLC program, changing it creates a new entity.**
+
+## Thermostats (presets and setpoint)
+
+If a climate object's `prog` field holds the name of a thermostat's time program (iControlLib `fb_iTimeProgWeek`, the block the iFoxtrot app shows as a thermostat), the integration finds that program's `GTSAP1_TPW_*` variables and the climate entity works like the iFoxtrot thermostat:
+
+- **Presets:** `schedule` (follow the weekly program, *auto*), `comfort` (day), `sleep` (night), `eco` and `limit`. Choosing one of the last four makes the room manual in that mode. **A manual setting ends by itself at the next switch time of the weekly program**, as in the app. `hvac_mode` *auto* is the same as `schedule`.
+- **Setpoint:** moves in 0.5 K steps, at most 5 K either way from the current mode's program temperature (that is the range Home Assistant offers). Each step is a command the PLC confirms before the next goes out, so a large change takes a few seconds. Setting a temperature while the room is in *schedule* makes it manual, as in the app.
+- **Attributes:** `holiday` (the program's holiday period is on) and `delta` (the offset in K).
+- The weekly program itself is not edited here yet.
+
+Without `prog`, or when the program is not published by the PLC (or two have the same name), the climate entity falls back to writing `sp`, which the PLC program may overwrite.
 
 ## How it behaves
 
@@ -58,8 +69,8 @@ Entities hang under one device per PLC. The entity name is the object's `name` i
 ## Limitations
 
 - Only objects named `ha_*` are visible. Anything else in the PLC is out of scope.
-- `climate`: the HVAC mode is fixed to *auto*; Home Assistant cannot switch it. `mode` from the PLC is read as the **current action** (0 idle, 1 heating, 2 cooling), which is what the reference PLC program writes, although the PLC type comment describes it as a setting.
-- `climate` setpoint: Home Assistant writes `sp`. Whether the value sticks depends on the PLC program: in the author's program the thermostat block assigns `sp` from its own schedule on every scan, so a written value may be overwritten. *To confirm on the controller.*
+- `climate`: the only HVAC mode is *auto* (there is no off). `mode` from the PLC is read as the **current action** (0 idle, 1 heating, 2 cooling), which is what the reference PLC program writes, although the PLC type comment describes it as a setting.
+- `climate` without a time program: Home Assistant writes `sp`; whether the value sticks depends on the PLC program (a thermostat block that assigns `sp` from its own schedule overwrites it on every scan).
 - One PLC per config entry; no YAML configuration.
 - PLCComS answers about four requests a second, so the integration keeps its conversation to a minimum (one read at start, then pushes).
 
@@ -77,9 +88,9 @@ The integration reads exactly these fields; the names and types come from the PL
 |---|---|
 | `T_HA_Sensor` (`kind` 2) | `name` STRING, `unit` STRING, `kind` INT, `value` REAL, `key` STRING |
 | `T_HA_Binary` (`kind` 3) | `name` STRING, `kind` INT, `state` BOOL, `writable` BOOL, `key` STRING |
-| `T_HA_Climate` (`kind` 1) | `unit` STRING, `kind` INT, `pv` REAL, `sp` REAL, `mode` INT, `writable_sp` BOOL, `writable_mode` BOOL, `key` STRING |
+| `T_HA_Climate` (`kind` 1) | `unit` STRING, `kind` INT, `pv` REAL, `sp` REAL, `mode` INT, `writable_sp` BOOL, `writable_mode` BOOL, `key` STRING, `prog` STRING |
 
-Optional for the integration: `name` on climate objects and `device_class` on binary objects (it falls back to the variable name and no device class). Variables must be published in the public file PLCComS serves, as described under Requirements. Minimal Structured Text:
+Optional for the integration: `name` on climate objects, `device_class` on binary objects (it falls back to the variable name and no device class) and `prog` (without it a climate object has no presets). The time-program variables (`GTSAP1_TPW_*`) must be published in the same public file; iControlLib marks them `{PUBLIC_IFOX}` already. Variables must be published in the public file PLCComS serves, as described under Requirements. Minimal Structured Text:
 
 ```
 TYPE

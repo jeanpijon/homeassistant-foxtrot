@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import UnitOfTemperature
 
 from .const import DOMAIN
-from . import make_unique_id
+from . import make_unique_id, thermostat
 
 
 ACTION_TO_HVAC = {
@@ -43,6 +43,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 class TecoClimate(CoordinatorEntity, ClimateEntity):
     _attr_has_entity_name = True
+    _attr_translation_key = "thermostat"
     # Home Assistant 2026.11 renamed the climate unit attribute; older releases only know the old one.
     if hasattr(ClimateEntity, "native_temperature_unit"):
         _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
@@ -54,7 +55,8 @@ class TecoClimate(CoordinatorEntity, ClimateEntity):
         self._client = client
         self._path = var_path
         self._supported = ClimateEntityFeature(0)
-        self._attr_hvac_modes = [HVACMode.OFF, HVACMode.AUTO]
+        self._tpw: dict[str, Any] | None = None
+        self._attr_hvac_modes = [HVACMode.AUTO]
         self._attr_hvac_mode = HVACMode.AUTO
         self._update_from_face()
 
@@ -75,6 +77,22 @@ class TecoClimate(CoordinatorEntity, ClimateEntity):
             # hvac modes already exposed; nothing to add here
             pass
         self._attr_supported_features = self._supported
+
+        # With the room's time program (iControlLib) the thermostat has presets and a setpoint the
+        # PLC keeps; without it the object can only offer a setpoint that the program overwrites.
+        self._tpw = tpw = f.get("_tpw")
+        if tpw:
+            self._attr_target_temperature = tpw.get("heattemp")
+            self._attr_target_temperature_step = thermostat.STEP
+            self._attr_preset_modes = thermostat.PRESETS
+            self._attr_preset_mode = thermostat.preset_of(tpw)
+            self._supported = ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
+            self._attr_supported_features = self._supported
+            if limits := thermostat.limits(tpw):
+                self._attr_min_temp, self._attr_max_temp = limits
+            self._attr_extra_state_attributes = {"holiday": bool(tpw.get("holiday")), "delta": tpw.get("delta")}
+        else:
+            self._attr_preset_modes = self._attr_preset_mode = self._attr_extra_state_attributes = None
 
         # hvac mode mapping
         action_int = int(f.get("mode", 0))  # default idle
@@ -102,4 +120,16 @@ class TecoClimate(CoordinatorEntity, ClimateEntity):
         if temp is None:
             return
         # The PLC confirms with a push, which updates the entity.
-        await self.coordinator.async_write(self._path, "sp", float(temp))
+        if self._tpw:
+            await thermostat.set_target(self.coordinator, self._tpw["_prefix"], float(temp))
+        else:
+            await self.coordinator.async_write(self._path, "sp", float(temp))
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        if self._tpw:
+            await thermostat.set_preset(self.coordinator, self._tpw["_prefix"], preset_mode)
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        # The only mode is auto: follow the weekly program.
+        if self._tpw and hvac_mode == HVACMode.AUTO:
+            await thermostat.set_preset(self.coordinator, self._tpw["_prefix"], thermostat.PRESET_SCHEDULE)
